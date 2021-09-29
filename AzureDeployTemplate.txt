@@ -1,0 +1,160 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "storageAccountType": {
+            "defaultValue": "Standard_LRS",
+            "allowedValues": [
+                "Standard_LRS",
+                "Standard_ZRS",
+                "Standard_GRS"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "Storage account type"
+            }
+        },
+        "storageAccountPrefix": {
+            "defaultValue": "sftpsandbox",
+            "type": "String",
+            "metadata": {
+                "description": "Prefix for new storage account"
+            }
+        },
+        "fileShareName": {
+            "defaultValue": "sftpfileshare",
+            "type": "String",
+            "metadata": {
+                "description": "Name of file share to be created"
+            }
+        },
+        "sftpUser": {
+            "defaultValue": "sftp",
+            "type": "String",
+            "metadata": {
+                "description": "Username to use for SFTP access"
+            }
+        },
+        "sftpPassword": {
+            "type": "SecureString",
+            "metadata": {
+                "description": "Password to use for SFTP access"
+            }
+        },
+        "location": {
+            "defaultValue": "[resourceGroup().location]",
+            "type": "String",
+            "metadata": {
+                "description": "Primary location for resources"
+            }
+        },
+        "containerGroupDNSLabel": {
+            "defaultValue": "[uniqueString(resourceGroup().id, deployment().name)]",
+            "type": "String",
+            "metadata": {
+                "description": "DNS label for container group"
+            }
+        }
+    },
+    "variables": {
+        "sftpContainerName": "sftpsandbox",
+        "sftpContainerGroupName": "sftpsandbox-group",
+        "sftpContainerImage": "vivek7339/atmoz-sftp:latest",
+        "sftpEnvVariable": "[format('{0}:{1}:1001', parameters('sftpUser'), parameters('sftpPassword'))]",
+        "storageAccountName": "[take(toLower(format('{0}{1}', parameters('storageAccountPrefix'), uniqueString(resourceGroup().id))), 24)]"
+    },
+    "functions": [],
+    "resources": [
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2019-06-01",
+            "name": "[variables('storageAccountName')]",
+            "location": "[parameters('location')]",
+            "sku": {
+                "name": "[parameters('storageAccountType')]"
+            },
+            "kind": "StorageV2"
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts/fileServices/shares",
+            "apiVersion": "2019-06-01",
+            "name": "[toLower(format('{0}/default/{1}', variables('storageAccountName'), parameters('fileShareName')))]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.ContainerInstance/containerGroups",
+            "apiVersion": "2019-12-01",
+            "name": "[variables('sftpContainerGroupName')]",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "properties": {
+                "containers": [
+                    {
+                        "name": "[variables('sftpContainerName')]",
+                        "properties": {
+                            "image": "[variables('sftpContainerImage')]",
+                            "environmentVariables": [
+                                {
+                                    "name": "SFTP_USERS",
+                                    "secureValue": "[variables('sftpEnvVariable')]"
+                                }
+                            ],
+                            "resources": {
+                                "requests": {
+                                    "cpu": 1,
+                                    "memoryInGB": 1
+                                }
+                            },
+                            "ports": [
+                                {
+                                    "port": 22,
+                                    "protocol": "TCP"
+                                }
+                            ],
+                            "volumeMounts": [
+                                {
+                                    "mountPath": "[format('/home/{0}/upload', parameters('sftpUser'))]",
+                                    "name": "sftpvolume",
+                                    "readOnly": false
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "osType": "Linux",
+                "ipAddress": {
+                    "type": "Public",
+                    "ports": [
+                        {
+                            "port": 22,
+                            "protocol": "TCP"
+                        }
+                    ],
+                    "dnsNameLabel": "[parameters('containerGroupDNSLabel')]"
+                },
+                "restartPolicy": "OnFailure",
+                "volumes": [
+                    {
+                        "name": "sftpvolume",
+                        "azureFile": {
+                            "readOnly": false,
+                            "shareName": "[parameters('fileShareName')]",
+                            "storageAccountName": "[variables('storageAccountName')]",
+                            "storageAccountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2019-06-01').keys[0].value]"
+                        }
+                    }
+                ]
+            }
+        }
+    ],
+    "outputs": {
+        "containerDNSLabel": {
+            "type": "String",
+            "value": "[format('{0}.{1}.azurecontainer.io', reference(resourceId('Microsoft.ContainerInstance/containerGroups', variables('sftpContainerGroupName'))).ipAddress.dnsNameLabel, reference(resourceId('Microsoft.ContainerInstance/containerGroups', variables('sftpContainerGroupName')), '2019-12-01', 'full').location)]"
+        }
+    }
+}

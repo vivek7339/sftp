@@ -11,7 +11,7 @@ on:
   pull_request:
 
 env:
-  IMAGE_NAME: atmoz/sftp
+  IMAGE_NAME: vivek7339/atmoz-sftp
 
 jobs:
   build:
@@ -54,12 +54,6 @@ jobs:
 
       - name: Test alpine image
         run: tests/run $IMAGE_NAME:alpine
-
-      - name: Verify signature
-        if: github.ref == 'refs/heads/master'
-        uses: atmoz/git-verify-ref@master
-        with:
-          import-github-users: atmoz
 
       - name: Push images to Docker Hub registry
         if: github.ref == 'refs/heads/master'
